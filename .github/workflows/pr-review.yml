@@ -21,12 +21,9 @@ jobs:
       - name: Get PR diff
         id: get-diff
         run: |
+          # Get the diff between base and head
           git fetch origin ${{ github.event.pull_request.base.ref }}
           git diff origin/${{ github.event.pull_request.base.ref }}...HEAD > pr-diff.txt
-          
-          # Limit diff size to prevent payload issues
-          head -n 500 pr-diff.txt > pr-diff-limited.txt
-          mv pr-diff-limited.txt pr-diff.txt
       
       - name: Get changed files
         id: changed-files
@@ -36,56 +33,77 @@ jobs:
       - name: Call A2A Agent for Review
         id: agent-review
         run: |
-          # Read diff content
-          DIFF_CONTENT=$(cat pr-diff.txt)
+          # Read diff and escape for JSON
+          DIFF_CONTENT=$(cat pr-diff.txt | python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))")
           
-          # Read changed files
-          FILES_LIST=$(cat changed-files.txt | tr '\n' ', ' | sed 's/,$//')
+          # Read changed files as JSON array
+          FILES_JSON=$(cat changed-files.txt | python3 -c "import sys, json; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))")
           
-          # Create simple JSON payload
+          # Escape PR title and description
+          PR_TITLE=$(echo '${{ github.event.pull_request.title }}' | python3 -c "import sys, json; print(json.dumps(sys.stdin.read().strip()))")
+          PR_BODY=$(echo '${{ github.event.pull_request.body }}' | python3 -c "import sys, json; print(json.dumps(sys.stdin.read().strip()))")
+          
+          # Create detailed review prompt
           cat > payload.json <<EOF
           {
-            "message": "Please review this pull request:\n\nPR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}\n\nFiles changed: ${FILES_LIST}\n\nCode diff:\n${DIFF_CONTENT}\n\nProvide detailed feedback on code quality, bugs, and security issues."
+            "message": "You are a code reviewer. Please thoroughly review this pull request and provide detailed feedback.\n\n**PR #${{ github.event.pull_request.number }}**: ${PR_TITLE}\n\n**Description**: ${PR_BODY}\n\n**Repository**: ${{ github.repository }}\n**Branch**: ${{ github.event.pull_request.head.ref }} → ${{ github.event.pull_request.base.ref }}\n**Author**: ${{ github.event.pull_request.user.login }}\n\n**Changed Files**:\n${FILES_JSON}\n\n**Code Changes (Git Diff)**:\n${DIFF_CONTENT}\n\nPlease analyze the code changes and provide:\n1. A summary of what this PR does\n2. Any bugs, security issues, or code quality problems you find\n3. Specific line-by-line feedback where applicable\n4. Suggestions for improvements\n5. Your recommendation: Approve or Request Changes\n\nFormat your response in markdown with clear sections."
           }
           EOF
           
-          echo "Calling agent..."
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+          # Call the A2A Agent
+          RESPONSE=$(curl -s -X POST \
             "https://servicesessentials.ibm.com/agenticapps/a2a/359c48fb-1ced-489b-a8fb-f889f32b4e11/agents/82273176-2914-4ed1-b0c6-9a5fd21ba874" \
             -H "Authorization: Bearer ${{ secrets.AGENT_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d @payload.json)
           
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+          # Save response for debugging
+          echo "$RESPONSE" > response.json
           
-          echo "HTTP Status: $HTTP_CODE"
-          echo "$RESPONSE_BODY" > response.json
+          # Extract review content from response
+          REVIEW_CONTENT=$(echo "$RESPONSE" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    
+    # Check for error status
+    if data.get('status') == 'error' or 'error' in data:
+        error_msg = data.get('error') or data.get('message') or 'Unknown error'
+        print(f'❌ Agent Error: {error_msg}')
+        sys.exit(0)
+    
+    # Extract assistant's response from messages array
+    messages = data.get('messages', [])
+    for msg in messages:
+        if msg.get('role') == 'assistant':
+            content = msg.get('content', '')
+            if content and content.strip():
+                print(content)
+                sys.exit(0)
+    
+    # Fallback: try other response fields
+    content = data.get('response') or data.get('message') or data.get('content') or data.get('output')
+    if content and content.strip():
+        print(content)
+    else:
+        print('⚠️ Agent returned empty response. Full response:')
+        print(json.dumps(data, indent=2))
+        
+except Exception as e:
+    print(f'❌ Error parsing agent response: {e}')
+    print('Raw response:', sys.stdin.read())
+")
           
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "✅ Agent responded successfully"
-            
-            # Try to extract review content
-            REVIEW=$(echo "$RESPONSE_BODY" | python3 -c "
-          import sys, json
-          try:
-              data = json.loads(sys.stdin.read())
-              content = data.get('response', data.get('message', data.get('content', data.get('output', 'No review content found'))))
-              print(content)
-          except:
-              print('Error parsing response')
-              print(sys.stdin.read())
-          " 2>&1)
-            
-            echo "$REVIEW" > review-output.txt
-          else
-            echo "❌ Error: HTTP $HTTP_CODE"
-            echo "Response: $RESPONSE_BODY"
-            echo "❌ Error: Agent returned HTTP $HTTP_CODE" > review-output.txt
-            echo "" >> review-output.txt
-            echo "Response: $RESPONSE_BODY" >> review-output.txt
+          # Save to file for next step
+          echo "$REVIEW_CONTENT" > review-output.txt
+          
+          # Check if we got a meaningful review
+          if echo "$REVIEW_CONTENT" | grep -q "Agent returned empty"; then
+            echo "⚠️ Warning: Agent did not provide detailed review"
+            echo "Check response.json artifact for details"
           fi
           
+          # Set output for GitHub Actions
           {
             echo "review<<EOF"
             cat review-output.txt
@@ -111,17 +129,14 @@ jobs:
         run: |
           REVIEW_CONTENT=$(cat review-output.txt)
           
-          if echo "$REVIEW_CONTENT" | grep -qi "Error:"; then
-            echo "⚠️ Agent encountered an error"
-            exit 0
-          elif echo "$REVIEW_CONTENT" | grep -qi "request changes"; then
+          if echo "$REVIEW_CONTENT" | grep -qi "request changes"; then
             echo "⚠️ Agent recommends requesting changes"
             exit 1
           elif echo "$REVIEW_CONTENT" | grep -qi "approve"; then
             echo "✅ Agent approves the changes"
             exit 0
           else
-            echo "ℹ️ Review completed"
+            echo "ℹ️ Review completed without clear decision"
             exit 0
           fi
       
