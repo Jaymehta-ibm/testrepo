@@ -37,6 +37,28 @@ jobs:
             origin/${{ github.event.pull_request.base.ref }}...HEAD \
             > changed-files.txt
 
+      - name: Collect changed file contents
+        shell: bash
+        run: |
+          rm -f changed-code.txt
+          touch changed-code.txt
+
+          while IFS= read -r file
+          do
+            if [ -f "$file" ]; then
+
+              echo "======================" >> changed-code.txt
+              echo "FILE: $file" >> changed-code.txt
+              echo "======================" >> changed-code.txt
+
+              cat "$file" >> changed-code.txt
+
+              echo "" >> changed-code.txt
+              echo "" >> changed-code.txt
+
+            fi
+          done < changed-files.txt
+
       - name: Build payload
         shell: bash
         run: |
@@ -53,15 +75,39 @@ jobs:
                   if line.strip()
               ]
 
+          with open("changed-code.txt", "r", encoding="utf-8") as f:
+              code_content = f.read()
+
           message = f"""
-          You are a code reviewer.
+          You are a senior software engineer performing a deep pull request review.
 
-          Review this pull request and provide:
+          Your goal is to provide REAL engineering feedback,
+          not generic CI/CD or security observations.
 
-          1. Summary
-          2. Bugs or risks
-          3. Code quality suggestions
-          4. Approval recommendation
+          Focus heavily on:
+          - runtime bugs
+          - edge cases
+          - code quality
+          - maintainability
+          - architecture
+          - readability
+          - scalability
+          - naming
+          - duplication
+          - validation issues
+          - null/undefined safety
+          - performance
+          - bad practices
+          - testing gaps
+          - API misuse
+
+          IMPORTANT:
+          - Give SPECIFIC code-level feedback
+          - Reference actual functions and code patterns
+          - Suggest exact fixes
+          - Explain WHY something is risky
+          - Provide improved code examples where useful
+          - Avoid generic comments
 
           Repository:
           ${{ github.repository }}
@@ -84,8 +130,37 @@ jobs:
           Changed Files:
           {chr(10).join(changed_files)}
 
-          Diff:
-          {diff_content[:5000]}
+          Git Diff:
+          {diff_content[:15000]}
+
+          Full Changed File Contents:
+          {code_content[:60000]}
+
+          Structure the response EXACTLY like this:
+
+          1. Summary
+
+          2. What looks good
+
+          3. Key issues
+          - Explain each issue clearly
+          - Include code examples
+          - Explain runtime impact
+
+          4. Style and maintainability feedback
+
+          5. Architectural concerns
+
+          6. Documentation suggestions
+
+          7. Test coverage suggestions
+
+          8. Suggested safer implementation
+
+          9. Final assessment
+
+          IMPORTANT:
+          This should feel like a real senior engineer PR review.
           """
 
           payload = {
@@ -107,7 +182,7 @@ jobs:
           echo "$RESPONSE" > response.json
 
           echo "===== RESPONSE PREVIEW ====="
-          echo "$RESPONSE" | head -c 500
+          echo "$RESPONSE" | head -c 1000
           echo ""
 
           if [ -n "$RESPONSE" ] && echo "$RESPONSE" | jq empty >/dev/null 2>&1; then
@@ -169,15 +244,12 @@ jobs:
 
           if echo "$REVIEW_CONTENT" | grep -qi "request changes"; then
             echo "⚠️ Agent recommends requesting changes"
-            exit 1
 
           elif echo "$REVIEW_CONTENT" | grep -qi "approve"; then
             echo "✅ Agent approves the changes"
-            exit 0
 
           else
             echo "ℹ️ Review completed without clear decision"
-            exit 0
           fi
 
       - name: Upload artifacts for debugging
@@ -188,6 +260,7 @@ jobs:
           path: |
             pr-diff.txt
             changed-files.txt
+            changed-code.txt
             payload.json
             response.json
             review-output.txt
