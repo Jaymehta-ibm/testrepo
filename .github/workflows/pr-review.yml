@@ -74,13 +74,7 @@ jobs:
             ')
           else
             # Response is not valid JSON, show raw response
-            REVIEW_CONTENT="❌ Agent returned invalid JSON response:
-
-\`\`\`
-$RESPONSE
-\`\`\`
-
-Please check the response.json artifact for details."
+            REVIEW_CONTENT="❌ Agent returned invalid JSON response. Please check the response.json artifact for details."
           fi
           
           # Save to file for next step
