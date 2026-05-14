@@ -34,9 +34,8 @@ jobs:
         id: agent-review
         run: |
           # Create payload using Python to properly escape everything
-          python3 << 'PYTHON_EOF' > payload.json
+          cat > create_payload.py << 'PYTHON_EOF'
 import json
-import sys
 
 # Read files
 with open('pr-diff.txt', 'r') as f:
@@ -88,6 +87,8 @@ payload = {"message": message}
 # Write JSON
 print(json.dumps(payload, indent=2))
 PYTHON_EOF
+          
+          python3 create_payload.py > payload.json
           
           # Call the A2A Agent
           RESPONSE=$(curl -s -X POST \
