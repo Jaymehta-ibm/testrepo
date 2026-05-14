@@ -60,6 +60,12 @@ jobs:
           # Save response for debugging
           echo "$RESPONSE" > response.json
           
+          # Debug: Show response status and first 500 chars
+          echo "Response preview (first 500 chars):"
+          echo "$RESPONSE" | head -c 500
+          echo ""
+          echo "Response length: $(echo "$RESPONSE" | wc -c) characters"
+          
           # Check if response is valid JSON
           if echo "$RESPONSE" | jq empty 2>/dev/null; then
             # Extract review content from response using jq
