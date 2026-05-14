@@ -43,10 +43,10 @@ jobs:
           PR_TITLE=$(echo '${{ github.event.pull_request.title }}' | python3 -c "import sys, json; print(json.dumps(sys.stdin.read().strip()))")
           PR_BODY=$(echo '${{ github.event.pull_request.body }}' | python3 -c "import sys, json; print(json.dumps(sys.stdin.read().strip()))")
           
-          # Create JSON payload
+          # Create detailed review prompt
           cat > payload.json <<EOF
           {
-            "message": "Please review this pull request:\n\nPR Title: ${PR_TITLE}\nPR Description: ${PR_BODY}\n\nDiff:\n${DIFF_CONTENT}",
+            "message": "You are a code reviewer. Please thoroughly review this pull request and provide detailed feedback.\n\nPR #${{ github.event.pull_request.number }}: ${PR_TITLE}\n\nDescription: ${PR_BODY}\n\nChanged Files:\n${FILES_JSON}\n\nCode Changes (Git Diff):\n${DIFF_CONTENT}\n\nPlease analyze the code changes and provide:\n1. A summary of what this PR does\n2. Any bugs, security issues, or code quality problems you find\n3. Specific line-by-line feedback where applicable\n4. Suggestions for improvements\n5. Your recommendation: Approve or Request Changes\n\nFormat your response in markdown with clear sections.",
             "context": {
               "pr_number": "${{ github.event.pull_request.number }}",
               "repository": "${{ github.repository }}",
@@ -68,11 +68,32 @@ jobs:
           # Save response for debugging
           echo "$RESPONSE" > response.json
           
-          # Extract review content from response
-          REVIEW_CONTENT=$(echo "$RESPONSE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('response', data.get('message', 'Review completed')))")
+          # Extract review content from response with better error handling
+          REVIEW_CONTENT=$(echo "$RESPONSE" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    # Try different response fields
+    content = data.get('response') or data.get('message') or data.get('content') or data.get('output')
+    if content and content.strip() and content.strip() != 'Review completed':
+        print(content)
+    else:
+        # If empty or generic, show the full response for debugging
+        print('⚠️ Agent returned empty or generic response. Full response:')
+        print(json.dumps(data, indent=2))
+except Exception as e:
+    print(f'❌ Error parsing agent response: {e}')
+    print('Raw response:', sys.stdin.read())
+")
           
           # Save to file for next step
           echo "$REVIEW_CONTENT" > review-output.txt
+          
+          # Check if we got a meaningful review
+          if echo "$REVIEW_CONTENT" | grep -q "Agent returned empty"; then
+            echo "⚠️ Warning: Agent did not provide detailed review"
+            echo "Check response.json artifact for details"
+          fi
           
           # Set output for GitHub Actions
           {
@@ -121,5 +142,3 @@ jobs:
             payload.json
             response.json
             review-output.txt
-
-# Made with Bob
