@@ -24,49 +24,62 @@ jobs:
           # Get the diff between base and head
           git fetch origin ${{ github.event.pull_request.base.ref }}
           git diff origin/${{ github.event.pull_request.base.ref }}...HEAD > pr-diff.txt
-          
-          # Escape the diff for JSON
-          DIFF_CONTENT=$(cat pr-diff.txt | jq -Rs .)
-          echo "diff=$DIFF_CONTENT" >> $GITHUB_OUTPUT
       
       - name: Get changed files
         id: changed-files
         run: |
-          FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD | jq -R -s -c 'split("\n")[:-1]')
-          echo "files=$FILES" >> $GITHUB_OUTPUT
+          git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD > changed-files.txt
       
       - name: Call A2A Agent for Review
         id: agent-review
         run: |
-          RESPONSE=$(curl -s -X POST \
-            "https://servicesessentials.ibm.com/agenticapps/a2a/359c48fb-1ced-489b-a8fb-f889f32b4e11/agents/82273176-2914-4ed1-b0c6-9a5fd21ba874" \
-            -H "Authorization: Bearer ${{ secrets.AGENT_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d @- <<EOF
+          # Read diff and escape for JSON
+          DIFF_CONTENT=$(cat pr-diff.txt | python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))")
+          
+          # Read changed files as JSON array
+          FILES_JSON=$(cat changed-files.txt | python3 -c "import sys, json; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))")
+          
+          # Escape PR title and description
+          PR_TITLE=$(echo '${{ github.event.pull_request.title }}' | python3 -c "import sys, json; print(json.dumps(sys.stdin.read().strip()))")
+          PR_BODY=$(echo '${{ github.event.pull_request.body }}' | python3 -c "import sys, json; print(json.dumps(sys.stdin.read().strip()))")
+          
+          # Create JSON payload
+          cat > payload.json <<EOF
           {
-            "message": "Please review this pull request:\n\nPR Title: ${{ github.event.pull_request.title }}\nPR Description: ${{ github.event.pull_request.body }}\n\nDiff:\n${{ steps.get-diff.outputs.diff }}",
+            "message": "Please review this pull request:\n\nPR Title: ${PR_TITLE}\nPR Description: ${PR_BODY}\n\nDiff:\n${DIFF_CONTENT}",
             "context": {
               "pr_number": "${{ github.event.pull_request.number }}",
               "repository": "${{ github.repository }}",
               "branch": "${{ github.event.pull_request.head.ref }}",
               "base_branch": "${{ github.event.pull_request.base.ref }}",
               "author": "${{ github.event.pull_request.user.login }}",
-              "files_changed": ${{ steps.changed-files.outputs.files }}
+              "files_changed": ${FILES_JSON}
             }
           }
           EOF
-          )
+          
+          # Call the A2A Agent
+          RESPONSE=$(curl -s -X POST \
+            "https://servicesessentials.ibm.com/agenticapps/a2a/359c48fb-1ced-489b-a8fb-f889f32b4e11/agents/82273176-2914-4ed1-b0c6-9a5fd21ba874" \
+            -H "Authorization: Bearer ${{ secrets.AGENT_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d @payload.json)
+          
+          # Save response for debugging
+          echo "$RESPONSE" > response.json
           
           # Extract review content from response
-          REVIEW_CONTENT=$(echo "$RESPONSE" | jq -r '.response // .message // "Review completed"')
+          REVIEW_CONTENT=$(echo "$RESPONSE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('response', data.get('message', 'Review completed')))")
           
           # Save to file for next step
           echo "$REVIEW_CONTENT" > review-output.txt
           
-          # Set output (truncated for GitHub Actions)
-          echo "review<<EOF" >> $GITHUB_OUTPUT
-          echo "$REVIEW_CONTENT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Set output for GitHub Actions
+          {
+            echo "review<<EOF"
+            cat review-output.txt
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
       
       - name: Post Review as Comment
         uses: actions/github-script@v7
@@ -97,3 +110,16 @@ jobs:
             echo "ℹ️ Review completed without clear decision"
             exit 0
           fi
+      
+      - name: Upload artifacts for debugging
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: review-artifacts
+          path: |
+            pr-diff.txt
+            payload.json
+            response.json
+            review-output.txt
+
+# Made with Bob
