@@ -2,7 +2,10 @@ name: Automatic PR Review with A2A Agent
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   pull-requests: write
@@ -11,164 +14,177 @@ permissions:
 jobs:
   review-pr:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Get PR diff
-        id: get-diff
         run: |
-          # Get the diff between base and head
           git fetch origin ${{ github.event.pull_request.base.ref }}
-          git diff origin/${{ github.event.pull_request.base.ref }}...HEAD > pr-diff.txt
-      
+
+          git diff \
+            origin/${{ github.event.pull_request.base.ref }}...HEAD \
+            > pr-diff.txt
+
       - name: Get changed files
-        id: changed-files
         run: |
-          git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD > changed-files.txt
-      
+          git diff --name-only \
+            origin/${{ github.event.pull_request.base.ref }}...HEAD \
+            > changed-files.txt
+
       - name: Call A2A Agent for Review
         id: agent-review
+        shell: bash
         run: |
-          # Create payload using Python to properly escape everything
-          cat > create_payload.py << 'PYTHON_EOF'
-import json
+          python3 <<'PYTHON_EOF' > payload.json
+          import json
 
-# Read files
-with open('pr-diff.txt', 'r') as f:
-    diff_content = f.read()
+          with open('pr-diff.txt', 'r', encoding='utf-8') as f:
+              diff_content = f.read()
 
-with open('changed-files.txt', 'r') as f:
-    changed_files = [line.strip() for line in f if line.strip()]
+          with open('changed-files.txt', 'r', encoding='utf-8') as f:
+              changed_files = [
+                  line.strip()
+                  for line in f
+                  if line.strip()
+              ]
 
-# PR details
-pr_number = "${{ github.event.pull_request.number }}"
-pr_title = "${{ github.event.pull_request.title }}"
-pr_body = "${{ github.event.pull_request.body }}"
-repository = "${{ github.repository }}"
-branch = "${{ github.event.pull_request.head.ref }}"
-base_branch = "${{ github.event.pull_request.base.ref }}"
-author = "${{ github.event.pull_request.user.login }}"
+          message = f"""
+          You are a code reviewer.
 
-# Build message
-message = f"""You are a code reviewer. Please thoroughly review this pull request and provide detailed feedback.
+          Please review this pull request.
 
-**PR #{pr_number}**: {pr_title}
+          Repository:
+          ${{ github.repository }}
 
-**Description**: {pr_body if pr_body else 'No description provided'}
+          PR Number:
+          ${{ github.event.pull_request.number }}
 
-**Repository**: {repository}
-**Branch**: {branch} → {base_branch}
-**Author**: {author}
+          Title:
+          ${{ github.event.pull_request.title }}
 
-**Changed Files**:
-{chr(10).join('- ' + f for f in changed_files)}
+          Author:
+          ${{ github.event.pull_request.user.login }}
 
-**Code Changes (Git Diff)**:
-```diff
-{diff_content[:5000]}
-```
+          Branch:
+          ${{ github.event.pull_request.head.ref }}
 
-Please analyze the code changes and provide:
-1. A summary of what this PR does
-2. Any bugs, security issues, or code quality problems you find
-3. Specific line-by-line feedback where applicable
-4. Suggestions for improvements
-5. Your recommendation: Approve or Request Changes
+          Base Branch:
+          ${{ github.event.pull_request.base.ref }}
 
-Format your response in markdown with clear sections."""
+          Changed Files:
+          {chr(10).join(changed_files)}
 
-# Create payload
-payload = {"message": message}
+          Diff:
+          {diff_content[:5000]}
 
-# Write JSON
-print(json.dumps(payload, indent=2))
-PYTHON_EOF
-          
-          python3 create_payload.py > payload.json
-          
-          # Call the A2A Agent
-          RESPONSE=$(curl -s -X POST \
+          Please provide:
+          1. Summary
+          2. Bugs or issues
+          3. Suggestions
+          4. Approval recommendation
+          """
+
+          payload = {
+              "message": message
+          }
+
+          print(json.dumps(payload))
+          PYTHON_EOF
+
+          echo "Payload created successfully"
+
+          RESPONSE=$(curl -s --fail-with-body -X POST \
             "https://servicesessentials.ibm.com/agenticapps/a2a/359c48fb-1ced-489b-a8fb-f889f32b4e11/agents/82273176-2914-4ed1-b0c6-9a5fd21ba874" \
             -H "Authorization: Bearer ${{ secrets.AGENT_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d @payload.json)
-          
-          # Save response for debugging
+
           echo "$RESPONSE" > response.json
-          
-          # Debug: Show response status and first 500 chars
-          echo "Response preview (first 500 chars):"
+
+          echo "===== RESPONSE PREVIEW ====="
           echo "$RESPONSE" | head -c 500
           echo ""
-          echo "Response length: $(echo "$RESPONSE" | wc -c) characters"
-          
-          # Check if response is valid JSON
-          if echo "$RESPONSE" | jq empty 2>/dev/null; then
-            # Extract review content from response using jq
+
+          if [ -n "$RESPONSE" ] && echo "$RESPONSE" | jq empty >/dev/null 2>&1; then
+
             REVIEW_CONTENT=$(echo "$RESPONSE" | jq -r '
               if .status == "error" or .error then
                 "❌ Agent Error: " + (.error // .message // "Unknown error")
+
               elif .messages then
-                (.messages[] | select(.role == "assistant") | .content) // "⚠️ No assistant response found"
+                (
+                  .messages[]
+                  | select(.role == "assistant")
+                  | .content
+                ) // "⚠️ No assistant response found"
+
               else
-                .response // .message // .content // .output // "⚠️ Agent returned empty response"
+                .response
+                // .message
+                // .content
+                // .output
+                // "⚠️ Agent returned empty response"
               end
             ')
+
           else
-            # Response is not valid JSON, show raw response
-            REVIEW_CONTENT="❌ Agent returned invalid JSON response. Please check the response.json artifact for details."
+            REVIEW_CONTENT="❌ Invalid JSON response from API"
           fi
-          
-          # Save to file for next step
+
           echo "$REVIEW_CONTENT" > review-output.txt
-          
-          # Check if we got a meaningful review
-          if echo "$REVIEW_CONTENT" | grep -q "Agent returned empty"; then
-            echo "⚠️ Warning: Agent did not provide detailed review"
-            echo "Check response.json artifact for details"
-          fi
-          
-          # Set output for GitHub Actions
+
           {
             echo "review<<EOF"
             cat review-output.txt
             echo "EOF"
           } >> $GITHUB_OUTPUT
-      
+
       - name: Post Review as Comment
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const reviewContent = fs.readFileSync('review-output.txt', 'utf8');
-            
+
+            const reviewContent = fs.readFileSync(
+              'review-output.txt',
+              'utf8'
+            );
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## 🤖 Automated PR Review\n\n${reviewContent}\n\n---\n*Review generated by A2A Agent*`
+              body: `## 🤖 Automated PR Review
+
+${reviewContent}
+
+---
+*Review generated by A2A Agent*`
             });
-      
+
       - name: Check Review Decision
+        shell: bash
         run: |
           REVIEW_CONTENT=$(cat review-output.txt)
-          
+
           if echo "$REVIEW_CONTENT" | grep -qi "request changes"; then
             echo "⚠️ Agent recommends requesting changes"
             exit 1
+
           elif echo "$REVIEW_CONTENT" | grep -qi "approve"; then
             echo "✅ Agent approves the changes"
             exit 0
+
           else
             echo "ℹ️ Review completed without clear decision"
             exit 0
           fi
-      
+
       - name: Upload artifacts for debugging
         if: always()
         uses: actions/upload-artifact@v4
@@ -176,8 +192,7 @@ PYTHON_EOF
           name: review-artifacts
           path: |
             pr-diff.txt
+            changed-files.txt
             payload.json
             response.json
             review-output.txt
-
-# Made with Bob
