@@ -1,0 +1,266 @@
+name: Automatic PR Review with A2A Agent
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        shell: bash
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+
+          git diff \
+            origin/${{ github.event.pull_request.base.ref }}...HEAD \
+            > pr-diff.txt
+
+      - name: Get changed files
+        shell: bash
+        run: |
+          git diff --name-only \
+            origin/${{ github.event.pull_request.base.ref }}...HEAD \
+            > changed-files.txt
+
+      - name: Collect changed file contents
+        shell: bash
+        run: |
+          rm -f changed-code.txt
+          touch changed-code.txt
+
+          while IFS= read -r file
+          do
+            if [ -f "$file" ]; then
+
+              echo "======================" >> changed-code.txt
+              echo "FILE: $file" >> changed-code.txt
+              echo "======================" >> changed-code.txt
+
+              cat "$file" >> changed-code.txt
+
+              echo "" >> changed-code.txt
+              echo "" >> changed-code.txt
+
+            fi
+          done < changed-files.txt
+
+      - name: Build payload
+        shell: bash
+        run: |
+          python3 <<'PYTHON_EOF' > payload.json
+          import json
+
+          with open("pr-diff.txt", "r", encoding="utf-8") as f:
+              diff_content = f.read()
+
+          with open("changed-files.txt", "r", encoding="utf-8") as f:
+              changed_files = [
+                  line.strip()
+                  for line in f
+                  if line.strip()
+              ]
+
+          with open("changed-code.txt", "r", encoding="utf-8") as f:
+              code_content = f.read()
+
+          message = f"""
+          You are a senior software engineer performing a deep pull request review.
+
+          Your goal is to provide REAL engineering feedback,
+          not generic CI/CD or security observations.
+
+          Focus heavily on:
+          - runtime bugs
+          - edge cases
+          - code quality
+          - maintainability
+          - architecture
+          - readability
+          - scalability
+          - naming
+          - duplication
+          - validation issues
+          - null/undefined safety
+          - performance
+          - bad practices
+          - testing gaps
+          - API misuse
+
+          IMPORTANT:
+          - Give SPECIFIC code-level feedback
+          - Reference actual functions and code patterns
+          - Suggest exact fixes
+          - Explain WHY something is risky
+          - Provide improved code examples where useful
+          - Avoid generic comments
+
+          Repository:
+          ${{ github.repository }}
+
+          PR Number:
+          ${{ github.event.pull_request.number }}
+
+          Title:
+          ${{ github.event.pull_request.title }}
+
+          Author:
+          ${{ github.event.pull_request.user.login }}
+
+          Head Branch:
+          ${{ github.event.pull_request.head.ref }}
+
+          Base Branch:
+          ${{ github.event.pull_request.base.ref }}
+
+          Changed Files:
+          {chr(10).join(changed_files)}
+
+          Git Diff:
+          {diff_content[:15000]}
+
+          Full Changed File Contents:
+          {code_content[:60000]}
+
+          Structure the response EXACTLY like this:
+
+          1. Summary
+
+          2. What looks good
+
+          3. Key issues
+          - Explain each issue clearly
+          - Include code examples
+          - Explain runtime impact
+
+          4. Style and maintainability feedback
+
+          5. Architectural concerns
+
+          6. Documentation suggestions
+
+          7. Test coverage suggestions
+
+          8. Suggested safer implementation
+
+          9. Final assessment
+
+          IMPORTANT:
+          This should feel like a real senior engineer PR review.
+          """
+
+          payload = {
+              "message": message
+          }
+
+          print(json.dumps(payload))
+          PYTHON_EOF
+
+      - name: Call A2A Agent
+        shell: bash
+        run: |
+          RESPONSE=$(curl -s --fail-with-body -X POST \
+            "https://servicesessentials.ibm.com/agenticapps/a2a/359c48fb-1ced-489b-a8fb-f889f32b4e11/agents/82273176-2914-4ed1-b0c6-9a5fd21ba874" \
+            -H "Authorization: Bearer ${{ secrets.AGENT_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d @payload.json)
+
+          echo "$RESPONSE" > response.json
+
+          echo "===== RESPONSE PREVIEW ====="
+          echo "$RESPONSE" | head -c 1000
+          echo ""
+
+          if [ -n "$RESPONSE" ] && echo "$RESPONSE" | jq empty >/dev/null 2>&1; then
+
+            REVIEW_CONTENT=$(echo "$RESPONSE" | jq -r '
+              if .status == "error" or .error then
+                "❌ Agent Error: " + (.error // .message // "Unknown error")
+
+              elif .messages then
+                (
+                  .messages[]
+                  | select(.role == "assistant")
+                  | .content
+                ) // "⚠️ No assistant response found"
+
+              else
+                .response
+                // .message
+                // .content
+                // .output
+                // "⚠️ Agent returned empty response"
+              end
+            ')
+
+          else
+            REVIEW_CONTENT="❌ Invalid JSON response from API"
+          fi
+
+          echo "$REVIEW_CONTENT" > review-output.txt
+
+      - name: Post Review as Comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            const reviewContent = fs.readFileSync(
+              'review-output.txt',
+              'utf8'
+            );
+
+            const body =
+              "## 🤖 Automated PR Review\n\n" +
+              reviewContent +
+              "\n\n---\n*Review generated by A2A Agent*";
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      - name: Check Review Decision
+        shell: bash
+        run: |
+          REVIEW_CONTENT=$(cat review-output.txt)
+
+          if echo "$REVIEW_CONTENT" | grep -qi "request changes"; then
+            echo "⚠️ Agent recommends requesting changes"
+
+          elif echo "$REVIEW_CONTENT" | grep -qi "approve"; then
+            echo "✅ Agent approves the changes"
+
+          else
+            echo "ℹ️ Review completed without clear decision"
+          fi
+
+      - name: Upload artifacts for debugging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-artifacts
+          path: |
+            pr-diff.txt
+            changed-files.txt
+            changed-code.txt
+            payload.json
+            response.json
+            review-output.txt
