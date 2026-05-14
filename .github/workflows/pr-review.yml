@@ -61,18 +61,21 @@ jobs:
           echo "$RESPONSE" > response.json
           
           # Extract review content from response
-          REVIEW_CONTENT=$(echo "$RESPONSE" | python3 -c "
+          REVIEW_CONTENT=$(python3 << 'PYTHON_SCRIPT'
 import sys, json
+
+response_text = '''$RESPONSE'''
+
 try:
-    data = json.load(sys.stdin)
+    data = json.loads(response_text)
     
     # Check for error status
     if data.get('status') == 'error' or 'error' in data:
-        error_msg = data.get('error') or data.get('message') or 'Unknown error'
+        error_msg = data.get('error', data.get('message', 'Unknown error'))
         print(f'❌ Agent Error: {error_msg}')
         sys.exit(0)
     
-    # Extract assistant's response from messages array
+    # Extract assistant response from messages array
     messages = data.get('messages', [])
     for msg in messages:
         if msg.get('role') == 'assistant':
@@ -91,8 +94,9 @@ try:
         
 except Exception as e:
     print(f'❌ Error parsing agent response: {e}')
-    print('Raw response:', sys.stdin.read())
-")
+    print(f'Raw response: {response_text[:500]}')
+PYTHON_SCRIPT
+)
           
           # Save to file for next step
           echo "$REVIEW_CONTENT" > review-output.txt
