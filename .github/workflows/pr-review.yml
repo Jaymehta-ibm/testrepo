@@ -33,22 +33,61 @@ jobs:
       - name: Call A2A Agent for Review
         id: agent-review
         run: |
-          # Read diff and escape for JSON
-          DIFF_CONTENT=$(cat pr-diff.txt | python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))")
-          
-          # Read changed files as JSON array
-          FILES_JSON=$(cat changed-files.txt | python3 -c "import sys, json; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))")
-          
-          # Escape PR title and description
-          PR_TITLE=$(echo '${{ github.event.pull_request.title }}' | python3 -c "import sys, json; print(json.dumps(sys.stdin.read().strip()))")
-          PR_BODY=$(echo '${{ github.event.pull_request.body }}' | python3 -c "import sys, json; print(json.dumps(sys.stdin.read().strip()))")
-          
-          # Create detailed review prompt
-          cat > payload.json <<EOF
-          {
-            "message": "You are a code reviewer. Please thoroughly review this pull request and provide detailed feedback.\n\n**PR #${{ github.event.pull_request.number }}**: ${PR_TITLE}\n\n**Description**: ${PR_BODY}\n\n**Repository**: ${{ github.repository }}\n**Branch**: ${{ github.event.pull_request.head.ref }} → ${{ github.event.pull_request.base.ref }}\n**Author**: ${{ github.event.pull_request.user.login }}\n\n**Changed Files**:\n${FILES_JSON}\n\n**Code Changes (Git Diff)**:\n${DIFF_CONTENT}\n\nPlease analyze the code changes and provide:\n1. A summary of what this PR does\n2. Any bugs, security issues, or code quality problems you find\n3. Specific line-by-line feedback where applicable\n4. Suggestions for improvements\n5. Your recommendation: Approve or Request Changes\n\nFormat your response in markdown with clear sections."
-          }
-          EOF
+          # Create payload using Python to properly escape everything
+          python3 << 'PYTHON_EOF' > payload.json
+import json
+import sys
+
+# Read files
+with open('pr-diff.txt', 'r') as f:
+    diff_content = f.read()
+
+with open('changed-files.txt', 'r') as f:
+    changed_files = [line.strip() for line in f if line.strip()]
+
+# PR details
+pr_number = "${{ github.event.pull_request.number }}"
+pr_title = "${{ github.event.pull_request.title }}"
+pr_body = "${{ github.event.pull_request.body }}"
+repository = "${{ github.repository }}"
+branch = "${{ github.event.pull_request.head.ref }}"
+base_branch = "${{ github.event.pull_request.base.ref }}"
+author = "${{ github.event.pull_request.user.login }}"
+
+# Build message
+message = f"""You are a code reviewer. Please thoroughly review this pull request and provide detailed feedback.
+
+**PR #{pr_number}**: {pr_title}
+
+**Description**: {pr_body if pr_body else 'No description provided'}
+
+**Repository**: {repository}
+**Branch**: {branch} → {base_branch}
+**Author**: {author}
+
+**Changed Files**:
+{chr(10).join('- ' + f for f in changed_files)}
+
+**Code Changes (Git Diff)**:
+```diff
+{diff_content[:5000]}
+```
+
+Please analyze the code changes and provide:
+1. A summary of what this PR does
+2. Any bugs, security issues, or code quality problems you find
+3. Specific line-by-line feedback where applicable
+4. Suggestions for improvements
+5. Your recommendation: Approve or Request Changes
+
+Format your response in markdown with clear sections."""
+
+# Create payload
+payload = {"message": message}
+
+# Write JSON
+print(json.dumps(payload, indent=2))
+PYTHON_EOF
           
           # Call the A2A Agent
           RESPONSE=$(curl -s -X POST \
