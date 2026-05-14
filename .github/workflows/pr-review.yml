@@ -60,8 +60,30 @@ jobs:
           # Save response for debugging
           echo "$RESPONSE" > response.json
           
-          # Extract review content from response using Python script
-          REVIEW_CONTENT=$(echo "$RESPONSE" | python3 .github/scripts/parse-review.py)
+          # Extract review content from response
+          REVIEW_CONTENT=$(echo "$RESPONSE" | python3 -c '
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    if data.get("status") == "error" or "error" in data:
+        print("❌ Agent Error:", data.get("error", data.get("message", "Unknown error")))
+    else:
+        messages = data.get("messages", [])
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                content = msg.get("content", "")
+                if content and content.strip():
+                    print(content)
+                    break
+        else:
+            content = data.get("response") or data.get("message") or data.get("content") or data.get("output")
+            if content and content.strip():
+                print(content)
+            else:
+                print("⚠️ Agent returned empty response")
+except Exception as e:
+    print("❌ Error parsing response:", str(e))
+')
           
           # Save to file for next step
           echo "$REVIEW_CONTENT" > review-output.txt
