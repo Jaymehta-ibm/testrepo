@@ -108,7 +108,10 @@ jobs:
           - Explain WHY something is risky
           - Provide improved code examples where useful
           - Avoid generic comments
-
+          - Only recommend "Request Changes" for critical runtime failures, security vulnerabilities, or severe GenAI workflow risks.
+          - Minor improvements, refactoring suggestions, documentation feedback, maintainability recommendations, or style issues should still result in "Recommendation: Approve".
+          - Do NOT recommend "Request Changes" for optimization suggestions, scalability improvements, naming improvements, documentation enhancements, or non-breaking edge-case refinements.
+          
           Repository:
           ${{ github.repository }}
 
@@ -241,16 +244,16 @@ jobs:
         shell: bash
         run: |
           REVIEW_CONTENT=$(cat review-output.txt)
-      
+
           echo "$REVIEW_CONTENT"
-      
+
           if echo "$REVIEW_CONTENT" | grep -Eiq "(division by zero|runtime error|runtime crash|cannot read property|null pointer|security vulnerability|hallucination risk|critical issue)"; then
             echo "❌ Critical issues detected"
             exit 1
-      
+
           else
             echo "✅ Review passed with suggestions"
-          fi    
+          fi
 
       - name: Upload artifacts for debugging
         if: always()
