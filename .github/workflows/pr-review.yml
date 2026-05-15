@@ -241,15 +241,17 @@ jobs:
         shell: bash
         run: |
           REVIEW_CONTENT=$(cat review-output.txt)
-
+      
           if echo "$REVIEW_CONTENT" | grep -qi "request changes"; then
-            echo "⚠️ Agent recommends requesting changes"
-
+            echo "❌ Agent recommends requesting changes"
+            exit 1
+      
           elif echo "$REVIEW_CONTENT" | grep -qi "approve"; then
             echo "✅ Agent approves the changes"
-
+      
           else
-            echo "ℹ️ Review completed without clear decision"
+            echo "⚠️ No clear recommendation found"
+            exit 1
           fi
 
       - name: Upload artifacts for debugging
