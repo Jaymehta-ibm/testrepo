@@ -241,16 +241,16 @@ jobs:
         shell: bash
         run: |
           REVIEW_CONTENT=$(cat review-output.txt)
-
-          if echo "$REVIEW_CONTENT" | grep -qi "request changes"; then
-            echo "⚠️ Agent recommends requesting changes"
-
-          elif echo "$REVIEW_CONTENT" | grep -qi "approve"; then
-            echo "✅ Agent approves the changes"
-
+      
+          echo "$REVIEW_CONTENT"
+      
+          if echo "$REVIEW_CONTENT" | grep -Eiq "(division by zero|runtime error|runtime crash|cannot read property|null pointer|security vulnerability|hallucination risk|critical issue)"; then
+            echo "❌ Critical issues detected"
+            exit 1
+      
           else
-            echo "ℹ️ Review completed without clear decision"
-          fi
+            echo "✅ Review passed with suggestions"
+          fi    
 
       - name: Upload artifacts for debugging
         if: always()
