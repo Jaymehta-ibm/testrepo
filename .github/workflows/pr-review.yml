@@ -108,6 +108,8 @@ jobs:
           - Explain WHY something is risky
           - Provide improved code examples where useful
           - Avoid generic comments
+          - Only recommend "Request Changes" for critical runtime failures, security vulnerabilities, or severe GenAI workflow risks.
+          - Minor improvements, refactoring suggestions, documentation feedback, maintainability recommendations, or style issues should still result in "Recommendation: Approve".
 
           Repository:
           ${{ github.repository }}
