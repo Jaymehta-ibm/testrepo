@@ -244,12 +244,20 @@ jobs:
       
           echo "$REVIEW_CONTENT"
       
-          if echo "$REVIEW_CONTENT" | grep -Eiq "(critical|security flaw|runtime error|hallucination risk)"; then
-            echo "❌ Critical issues detected"
+          FINAL_RECOMMENDATION=$(echo "$REVIEW_CONTENT" | grep -i "Recommendation:" | tail -1)
+      
+          echo "Final Recommendation: $FINAL_RECOMMENDATION"
+      
+          if echo "$FINAL_RECOMMENDATION" | grep -qi "Recommendation.*Request Changes"; then
+            echo "❌ Agent recommends requesting changes"
             exit 1
       
+          elif echo "$FINAL_RECOMMENDATION" | grep -qi "Recommendation.*Approve"; then
+            echo "✅ Agent approves the changes"
+      
           else
-            echo "✅ Review passed"
+            echo "⚠️ No clear recommendation found"
+            exit 1
           fi
 
       - name: Upload artifacts for debugging
