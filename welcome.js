@@ -20,12 +20,12 @@ function processOrders(orders) {
     throw new Error("Orders must be an array.");
   }
   return orders.reduce((total, order, index) => {
-    if (!order || typeof order.price === 'undefined') {
-      throw new Error(`Missing price at index ${index}`);
+    if (!order || typeof order.price !== 'string' && typeof order.price !== 'number') {
+      throw new Error(`Invalid price '${order.price}' at index ${index}`);
     }
     const price = parseFloat(order.price);
-    if (isNaN(price)) {
-      throw new Error(`Invalid price at index ${index}`);
+    if (!Number.isFinite(price) || price < 0) {
+      throw new Error(`Invalid price '${order.price}' at index ${index}`);
     }
     return total + price;
   }, 0);
