@@ -17,7 +17,7 @@ function processOrders(orders) {
 }
 
 const result = divideNumbers(10, 0);
-console.log("Result:", result);
+console.log("Result::", result);
 
 const user = null;
 console.log(getUserName(user));
