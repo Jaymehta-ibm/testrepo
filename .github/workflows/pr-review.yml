@@ -242,11 +242,15 @@ jobs:
         run: |
           REVIEW_CONTENT=$(cat review-output.txt)
       
-          if echo "$REVIEW_CONTENT" | grep -qi "request changes"; then
+          FINAL_RECOMMENDATION=$(echo "$REVIEW_CONTENT" | grep -i "^Recommendation:" | tail -1)
+      
+          echo "Final Recommendation: $FINAL_RECOMMENDATION"
+      
+          if echo "$FINAL_RECOMMENDATION" | grep -qi "request changes"; then
             echo "❌ Agent recommends requesting changes"
             exit 1
       
-          elif echo "$REVIEW_CONTENT" | grep -qi "approve"; then
+          elif echo "$FINAL_RECOMMENDATION" | grep -qi "approve"; then
             echo "✅ Agent approves the changes"
       
           else
