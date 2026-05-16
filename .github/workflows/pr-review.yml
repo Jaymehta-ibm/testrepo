@@ -211,8 +211,6 @@ jobs:
           RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
           
           echo "HTTP Status Code: $HTTP_CODE"
-          echo "Response Body Preview:"
-          echo "$RESPONSE_BODY" | head -c 500
           
           # Check if request succeeded
           if [ "$HTTP_CODE" != "200" ]; then
@@ -224,14 +222,12 @@ jobs:
           
           echo "✅ Langflow API call succeeded"
           
+          # Save response to file
           echo "$RESPONSE_BODY" > response.json
           RESPONSE="$RESPONSE_BODY"
-
-          echo "$RESPONSE" > response.json
-
-          echo "===== RESPONSE PREVIEW ====="
-          echo "$RESPONSE" | head -c 1000
-          echo ""
+          
+          echo "Response saved to response.json"
+          echo "Response size: $(echo "$RESPONSE_BODY" | wc -c) bytes"
 
           if [ -n "$RESPONSE" ] && echo "$RESPONSE" | jq empty >/dev/null 2>&1; then
 
