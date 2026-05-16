@@ -179,24 +179,32 @@ jobs:
           # Extract message from payload
           MESSAGE=$(cat payload.json | jq -r '.message')
           
-          # Build the input payload for Langflow tweaks format
+          # Generate a unique session ID for this PR review
+          SESSION_ID="pr-${{ github.event.pull_request.number }}-${{ github.run_id }}"
+          
+          # Build the input payload for Langflow with correct format
           LANGFLOW_PAYLOAD=$(jq -n \
             --arg msg "$MESSAGE" \
+            --arg session "$SESSION_ID" \
             '{
-              "input_value": $msg,
               "output_type": "chat",
               "input_type": "chat",
-              "tweaks": {}
+              "input_value": $msg,
+              "session_id": $session
             }')
           
           echo "$LANGFLOW_PAYLOAD" > langflow-payload.json
+          echo "Payload:"
+          cat langflow-payload.json
           
-          # Call Langflow with correct FLOW_ID
-          echo "Calling Langflow Flow ID: 359c48fb-1ced-489b-a8fb-f889f32b4e11"
+          # Call Langflow with correct FLOW_ID and stream=false parameter
+          echo "Calling Langflow Flow ID: 39b731f3-5f2a-4e7a-a247-2271d864c909"
+          echo "Session ID: $SESSION_ID"
+          
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-            "https://langflow.servicesessentials.ibm.com/api/v1/run/359c48fb-1ced-489b-a8fb-f889f32b4e11" \
-            -H "x-api-key: ${{ secrets.LANGFLOW_API_KEY }}" \
+            "https://langflow.servicesessentials.ibm.com/api/v1/run/39b731f3-5f2a-4e7a-a247-2271d864c909?stream=false" \
             -H "Content-Type: application/json" \
+            -H "x-api-key: ${{ secrets.LANGFLOW_API_KEY }}" \
             -d @langflow-payload.json)
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
