@@ -134,10 +134,10 @@ jobs:
           {chr(10).join(changed_files)}
 
           Git Diff:
-          {diff_content[:15000]}
-
+          {diff_content[:5000]}
+          
           Full Changed File Contents:
-          {code_content[:60000]}
+          {code_content[:10000]}
 
           Structure the response EXACTLY like this:
 
@@ -236,10 +236,22 @@ jobs:
           # Check for curl timeout (exit code 28)
           if [ -z "$HTTP_CODE" ] || [ "$HTTP_CODE" = "000" ]; then
             echo "❌ Langflow API call timed out after 5 minutes"
-            echo "⚠️ The flow is taking too long to process. Consider:"
-            echo "   1. Reducing the PR diff size"
-            echo "   2. Optimizing the Langflow flow"
-            echo "   3. Creating a simpler/faster flow for CI"
+            echo ""
+            echo "⚠️ The multi-agent flow is taking too long. Recommended solutions:"
+            echo ""
+            echo "1. **Create a simpler flow for CI** (RECOMMENDED):"
+            echo "   - Use only 1 agent instead of 2"
+            echo "   - Reduce prompt complexity"
+            echo "   - Optimize for speed over depth"
+            echo ""
+            echo "2. **Reduce payload size:**
+            echo "   - Current limit: 50KB"
+            echo "   - Consider lowering to 20KB"
+            echo ""
+            echo "3. **Optimize the current flow:**
+            echo "   - Reduce context window"
+            echo "   - Use faster LLM model"
+            echo "   - Enable streaming responses"
             exit 1
           fi
           
