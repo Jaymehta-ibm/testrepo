@@ -179,26 +179,22 @@ jobs:
           # Extract message from payload
           MESSAGE=$(cat payload.json | jq -r '.message')
           
-          # Generate truly unique IDs with timestamp and random component
+          # Generate truly unique session ID with timestamp and random component
           TIMESTAMP=$(date +%s%N)
           RANDOM_ID=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 8 | head -n 1)
           SESSION_ID="pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${TIMESTAMP}-${RANDOM_ID}"
           
-          # Generate unique thread_id (UUID format) to avoid checkpoint conflicts
-          THREAD_ID=$(cat /proc/sys/kernel/random/uuid)
-          
           # Build the input payload for Langflow with correct format
-          # Include thread_id to ensure each call creates a new thread
+          # DO NOT include thread_id - let ICA generate its own unique thread ID
+          # This prevents checkpoint conflicts from reused thread IDs
           LANGFLOW_PAYLOAD=$(jq -n \
             --arg msg "$MESSAGE" \
             --arg session "$SESSION_ID" \
-            --arg thread "$THREAD_ID" \
             '{
               "output_type": "chat",
               "input_type": "chat",
               "input_value": $msg,
               "session_id": $session,
-              "thread_id": $thread,
               "tweaks": {
                 "clear_history": true
               }
