@@ -16,8 +16,8 @@ function processOrders(orders) {
   return total;
 }
 
-const result = divideNumbers(10, 0);
-console.log("Result::", result);
+const result = divideNumbers(90, 0);
+console.log("Result:::", result);
 
 const user = null;
 console.log(getUserName(user));
