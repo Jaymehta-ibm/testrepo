@@ -1,1 +1,3 @@
-console.log("welcome");
+function divideNumbers(a, b) {
+  return a / b;
+}
