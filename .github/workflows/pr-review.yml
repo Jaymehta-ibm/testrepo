@@ -176,11 +176,22 @@ jobs:
       - name: Call Langflow Multi-Agent Workflow
         shell: bash
         run: |
+          # Build the input payload for Langflow
+          LANGFLOW_PAYLOAD=$(jq -n \
+            --arg msg "$(cat payload.json | jq -r '.message')" \
+            '{
+              "input_value": $msg,
+              "output_type": "chat",
+              "input_type": "chat"
+            }')
+          
+          echo "$LANGFLOW_PAYLOAD" > langflow-payload.json
+          
           RESPONSE=$(curl -s --fail-with-body -X POST \
-            "https://langflow.servicesessentials.ibm.com/api/v1/run/7e3a09a0-e26e-47ed-bbc8-220e2aeed59a" \
+            "https://langflow.servicesessentials.ibm.com/api/v1/run/7e3a09a0-e26e-47ed-bbc8-220e2aeed59a?stream=false" \
             -H "x-api-key: ${{ secrets.LANGFLOW_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d @payload.json)
+            -d @langflow-payload.json)
 
           echo "$RESPONSE" > response.json
 
@@ -192,9 +203,18 @@ jobs:
 
             REVIEW_CONTENT=$(echo "$RESPONSE" | jq -r '
               if .status == "error" or .error then
-                "❌ Agent Error: " + (.error // .message // "Unknown error")
+                "❌ Langflow Error: " + (.error // .message // "Unknown error")
+
+              elif .outputs then
+                # Langflow response format
+                (
+                  .outputs[0].outputs[0].results.message.text
+                  // .outputs[0].outputs[0].results.text
+                  // .outputs[0].outputs[0].message
+                ) // "⚠️ No output found in Langflow response"
 
               elif .messages then
+                # A2A format (fallback)
                 (
                   .messages[]
                   | select(.role == "assistant")
@@ -206,7 +226,7 @@ jobs:
                 // .message
                 // .content
                 // .output
-                // "⚠️ Agent returned empty response"
+                // "⚠️ Workflow returned empty response"
               end
             ')
 
@@ -265,5 +285,6 @@ jobs:
             changed-files.txt
             changed-code.txt
             payload.json
+            langflow-payload.json
             response.json
             review-output.txt
