@@ -179,9 +179,10 @@ jobs:
           # Extract message from payload
           MESSAGE=$(cat payload.json | jq -r '.message')
           
-          # Generate a unique session ID with timestamp to avoid database conflicts
+          # Generate a truly unique session ID with timestamp and random component
           TIMESTAMP=$(date +%s%N)
-          SESSION_ID="pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${TIMESTAMP}"
+          RANDOM_ID=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 8 | head -n 1)
+          SESSION_ID="pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${TIMESTAMP}-${RANDOM_ID}"
           
           # Build the input payload for Langflow with correct format
           LANGFLOW_PAYLOAD=$(jq -n \
