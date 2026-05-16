@@ -237,12 +237,25 @@ jobs:
                 "❌ Langflow Error: " + (.error // .message // "Unknown error")
 
               elif .outputs then
-                # Langflow response format
-                (
-                  .outputs[0].outputs[0].results.message.text
-                  // .outputs[0].outputs[0].results.text
-                  // .outputs[0].outputs[0].message
-                ) // "⚠️ No output found in Langflow response"
+                # Langflow multi-agent response format
+                # Extract outputs from all agents and combine them
+                if (.outputs | length) > 0 then
+                  (
+                    # Try to get all agent outputs
+                    [.outputs[].outputs[]?.results.message.text // .outputs[].outputs[]?.results.text // .outputs[].outputs[]?.message]
+                    | map(select(. != null))
+                    | if length > 0 then
+                        # Combine all agent outputs with separators
+                        "## 📊 Agent 1: Comprehensive Technical Review\n\n" + .[0] +
+                        (if length > 1 then "\n\n---\n\n## 🎨 Agent 2: Code Quality Score\n\n" + .[1] else "" end) +
+                        (if length > 2 then "\n\n---\n\n## 📋 Agent 3: Additional Analysis\n\n" + .[2] else "" end)
+                      else
+                        "⚠️ No output found in Langflow response"
+                      end
+                  )
+                else
+                  "⚠️ No outputs array in response"
+                end
 
               elif .messages then
                 # A2A format (fallback)
