@@ -179,8 +179,9 @@ jobs:
           # Extract message from payload
           MESSAGE=$(cat payload.json | jq -r '.message')
           
-          # Generate a unique session ID for this PR review
-          SESSION_ID="pr-${{ github.event.pull_request.number }}-${{ github.run_id }}"
+          # Generate a unique session ID with timestamp to avoid database conflicts
+          TIMESTAMP=$(date +%s%N)
+          SESSION_ID="pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${TIMESTAMP}"
           
           # Build the input payload for Langflow with correct format
           LANGFLOW_PAYLOAD=$(jq -n \
