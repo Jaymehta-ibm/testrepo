@@ -176,22 +176,48 @@ jobs:
       - name: Call Langflow Multi-Agent Workflow
         shell: bash
         run: |
-          # Build the input payload for Langflow
+          # Extract message from payload
+          MESSAGE=$(cat payload.json | jq -r '.message')
+          
+          # Build the input payload for Langflow tweaks format
           LANGFLOW_PAYLOAD=$(jq -n \
-            --arg msg "$(cat payload.json | jq -r '.message')" \
+            --arg msg "$MESSAGE" \
             '{
               "input_value": $msg,
               "output_type": "chat",
-              "input_type": "chat"
+              "input_type": "chat",
+              "tweaks": {}
             }')
           
           echo "$LANGFLOW_PAYLOAD" > langflow-payload.json
           
-          RESPONSE=$(curl -s --fail-with-body -X POST \
-            "https://langflow.servicesessentials.ibm.com/api/v1/run/7e3a09a0-e26e-47ed-bbc8-220e2aeed59a?stream=false" \
+          # Call Langflow with correct FLOW_ID
+          echo "Calling Langflow Flow ID: 359c48fb-1ced-489b-a8fb-f889f32b4e11"
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://langflow.servicesessentials.ibm.com/api/v1/run/359c48fb-1ced-489b-a8fb-f889f32b4e11" \
             -H "x-api-key: ${{ secrets.LANGFLOW_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d @langflow-payload.json)
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          echo "HTTP Status Code: $HTTP_CODE"
+          echo "Response Body Preview:"
+          echo "$RESPONSE_BODY" | head -c 500
+          
+          # Check if request succeeded
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Langflow API call failed with status $HTTP_CODE"
+            echo "Full response:"
+            echo "$RESPONSE_BODY"
+            exit 1
+          fi
+          
+          echo "✅ Langflow API call succeeded"
+          
+          echo "$RESPONSE_BODY" > response.json
+          RESPONSE="$RESPONSE_BODY"
 
           echo "$RESPONSE" > response.json
 
