@@ -213,8 +213,8 @@ jobs:
             echo "✅ Valid JSON response received"
           
             REVIEW_CONTENT=$(echo "$RESPONSE" | jq -r '
-              .. | .text? // empty
-            ' | head -n 1)
+              first(.. | .text? // empty)
+            ')
           
             if [ -z "$REVIEW_CONTENT" ]; then
               REVIEW_CONTENT="⚠️ No review content found"
