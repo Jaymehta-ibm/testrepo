@@ -166,7 +166,7 @@ jobs:
           echo "$LANGFLOW_PAYLOAD" > langflow-payload.json
 
           echo "===== PAYLOAD PREVIEW ====="
-          cat langflow-payload.json | head -c 500
+          echo "${LANGFLOW_PAYLOAD:0:500}"
           echo ""
 
           echo "===== CALLING LANGFLOW ====="
@@ -202,45 +202,26 @@ jobs:
           RESPONSE="$RESPONSE_BODY"
 
           echo "===== RESPONSE PREVIEW ====="
-          echo "$RESPONSE" | head -c 1000
+          echo "${RESPONSE:0:1000}"
           echo ""
 
           if [ -n "$RESPONSE" ] && echo "$RESPONSE" | jq empty >/dev/null 2>&1; then
 
             REVIEW_CONTENT=$(echo "$RESPONSE" | jq -r '
-              if .status == "error" or .error then
-                "❌ Langflow Error: " + (.error // .message // "Unknown error")
-
-              elif .outputs then
-                (
-                  [.outputs[].outputs[]?.results.message.text // .outputs[].outputs[]?.results.text // .outputs[].outputs[]?.message]
-                  | map(select(. != null))
-                  | if length > 0 then
-                      .[0]
-                    else
-                      "⚠️ No output found in Langflow response"
-                    end
-                )
-
-              elif .messages then
-                (
-                  .messages[]
-                  | select(.role == "assistant")
-                  | .content
-                ) // "⚠️ No assistant response found"
-
-              else
-                .response
-                // .message
-                // .content
-                // .output
-                // "⚠️ Workflow returned empty response"
-              end
+              .message.text
+              // .message.data.text
+              // .response
+              // .content
+              // .output
+              // "⚠️ No review content found"
             ')
 
           else
             REVIEW_CONTENT="❌ Invalid JSON response from API"
           fi
+
+          echo "===== REVIEW CONTENT ====="
+          echo "$REVIEW_CONTENT"
 
           echo "$REVIEW_CONTENT" > review-output.txt
 
