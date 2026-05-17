@@ -225,8 +225,15 @@ jobs:
           echo "$REVIEW_CONTENT"
           echo "===================================="
           echo ""
-
+          
           echo "$REVIEW_CONTENT" > review-output.txt
+          
+          echo "✅ Review content saved to review-output.txt"
+          
+          echo ""
+          echo "===== REVIEW FILE PREVIEW ====="
+          cat review-output.txt
+          echo ""
 
       - name: Post Review as Comment
         uses: actions/github-script@v7
