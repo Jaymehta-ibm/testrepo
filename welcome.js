@@ -1,3 +1,3 @@
-function divideNumberrs(a, b) {
+function divideNumbers(a, b) {
   return a / b;
 }
