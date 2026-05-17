@@ -198,7 +198,10 @@ jobs:
           echo "✅ Langflow API call succeeded"
 
           echo "$RESPONSE_BODY" > response.json
-
+          echo ""
+          echo "===== FULL RAW RESPONSE ====="
+          cat response.json
+          echo ""
           RESPONSE="$RESPONSE_BODY"
 
           echo "===== RESPONSE PREVIEW ====="
@@ -207,15 +210,16 @@ jobs:
 
           if [ -n "$RESPONSE" ] && echo "$RESPONSE" | jq empty >/dev/null 2>&1; then
 
+            echo "✅ Valid JSON response received"
+          
             REVIEW_CONTENT=$(echo "$RESPONSE" | jq -r '
-              .message.data.text
-              // .message.text
-              // .response
-              // .content
-              // .output
-              // "⚠️ No review content found"
-            ')
-
+              .. | .text? // empty
+            ' | head -n 1)
+          
+            if [ -z "$REVIEW_CONTENT" ]; then
+              REVIEW_CONTENT="⚠️ No review content found"
+            fi
+          
           else
             REVIEW_CONTENT="❌ Invalid JSON response from API"
           fi
