@@ -14,6 +14,7 @@ permissions:
 jobs:
   review-pr:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -81,9 +82,6 @@ jobs:
           message = f"""
           You are a senior software engineer performing a deep pull request review.
 
-          Your goal is to provide REAL engineering feedback,
-          not generic CI/CD or security observations.
-
           Focus heavily on:
           - runtime bugs
           - edge cases
@@ -91,27 +89,17 @@ jobs:
           - maintainability
           - architecture
           - readability
-          - scalability
-          - naming
-          - duplication
           - validation issues
-          - null/undefined safety
+          - null safety
           - performance
-          - bad practices
           - testing gaps
-          - API misuse
 
           IMPORTANT:
           - Give SPECIFIC code-level feedback
-          - Reference actual functions and code patterns
           - Suggest exact fixes
-          - Explain WHY something is risky
-          - Provide improved code examples where useful
+          - Explain runtime impact
           - Avoid generic comments
-          - Only recommend "Request Changes" for critical runtime failures, security vulnerabilities, or severe GenAI workflow risks.
-          - Minor improvements, refactoring suggestions, documentation feedback, maintainability recommendations, or style issues should still result in "Recommendation: Approve".
-          - Do NOT recommend "Request Changes" for optimization suggestions, scalability improvements, naming improvements, documentation enhancements, or non-breaking edge-case refinements.
-          
+
           Repository:
           ${{ github.repository }}
 
@@ -121,49 +109,27 @@ jobs:
           Title:
           ${{ github.event.pull_request.title }}
 
-          Author:
-          ${{ github.event.pull_request.user.login }}
-
-          Head Branch:
-          ${{ github.event.pull_request.head.ref }}
-
-          Base Branch:
-          ${{ github.event.pull_request.base.ref }}
-
           Changed Files:
           {chr(10).join(changed_files)}
 
           Git Diff:
           {diff_content[:5000]}
-          
+
           Full Changed File Contents:
           {code_content[:10000]}
 
-          Structure the response EXACTLY like this:
-
+          Structure response like:
           1. Summary
-
           2. What looks good
-
           3. Key issues
-          - Explain each issue clearly
-          - Include code examples
-          - Explain runtime impact
-
-          4. Style and maintainability feedback
-
-          5. Architectural concerns
-
-          6. Documentation suggestions
-
-          7. Test coverage suggestions
-
-          8. Suggested safer implementation
-
-          9. Final assessment
+          4. Suggestions
+          5. Final recommendation
 
           IMPORTANT:
-          This should feel like a real senior engineer PR review.
+          Use:
+          Recommendation: Approve
+          OR
+          Recommendation: Request Changes
           """
 
           payload = {
@@ -176,27 +142,14 @@ jobs:
       - name: Call Langflow Multi-Agent Workflow
         shell: bash
         run: |
-          # Extract message from payload
           MESSAGE=$(cat payload.json | jq -r '.message')
-          
-          # Cap payload size to prevent timeouts (max 50KB)
+
           MESSAGE_SIZE=$(echo "$MESSAGE" | wc -c)
-          MAX_SIZE=51200  # 50KB
-          
-          if [ "$MESSAGE_SIZE" -gt "$MAX_SIZE" ]; then
-            echo "⚠️ Payload too large ($MESSAGE_SIZE bytes), truncating to $MAX_SIZE bytes"
-            MESSAGE=$(echo "$MESSAGE" | head -c $MAX_SIZE)
-            MESSAGE="$MESSAGE\n\n... [Truncated due to size limit. Full diff available in PR.]"
-          fi
-          
-          # Generate truly unique session ID with timestamp and random component
-          TIMESTAMP=$(date +%s%N)
-          RANDOM_ID=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 8 | head -n 1)
-          SESSION_ID="pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${TIMESTAMP}-${RANDOM_ID}"
-          
-          # Build the input payload for Langflow with correct format
-          # DO NOT include thread_id - let ICA generate its own unique thread ID
-          # This prevents checkpoint conflicts from reused thread IDs
+
+          echo "Payload size: $MESSAGE_SIZE bytes"
+
+          SESSION_ID=$(uuidgen)
+
           LANGFLOW_PAYLOAD=$(jq -n \
             --arg msg "$MESSAGE" \
             --arg session "$SESSION_ID" \
@@ -209,100 +162,67 @@ jobs:
                 "clear_history": true
               }
             }')
-          
+
           echo "$LANGFLOW_PAYLOAD" > langflow-payload.json
-          echo "Payload size: $MESSAGE_SIZE bytes"
-          echo "Payload preview:"
+
+          echo "===== PAYLOAD PREVIEW ====="
           cat langflow-payload.json | head -c 500
-          echo "..."
-          
-          # Call Langflow with correct FLOW_ID and stream=false parameter
-          # Add --max-time to prevent hanging (5 minutes timeout)
-          echo "Calling Langflow Flow ID: 39b731f3-5f2a-4e7a-a247-2271d864c909"
+          echo ""
+
+          echo "===== CALLING LANGFLOW ====="
+          echo "Flow ID: 39b731f3-5f2a-4e7a-a247-2271d864c909"
           echo "Session ID: $SESSION_ID"
-          echo "Timeout: 300 seconds (5 minutes)"
-          
-          RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 300 -X POST \
+
+          RESPONSE=$(curl --max-time 300 -s -w "\n%{http_code}" -X POST \
             "https://langflow.servicesessentials.ibm.com/api/v1/run/39b731f3-5f2a-4e7a-a247-2271d864c909?stream=false" \
             -H "Content-Type: application/json" \
             -H "x-api-key: ${{ secrets.LANGFLOW_API_KEY }}" \
             -d @langflow-payload.json)
-          
+
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
-          
+
           echo "HTTP Status Code: $HTTP_CODE"
-          
-          # Check for curl timeout (exit code 28)
+
           if [ -z "$HTTP_CODE" ] || [ "$HTTP_CODE" = "000" ]; then
-            echo "❌ Langflow API call timed out after 5 minutes"
-            echo ""
-            echo "⚠️ The multi-agent flow is taking too long. Recommended solutions:"
-            echo ""
-            echo "1. **Create a simpler flow for CI** (RECOMMENDED):"
-            echo "   - Use only 1 agent instead of 2"
-            echo "   - Reduce prompt complexity"
-            echo "   - Optimize for speed over depth"
-            echo ""
-            echo "2. **Reduce payload size:**
-            echo "   - Current limit: 50KB"
-            echo "   - Consider lowering to 20KB"
-            echo ""
-            echo "3. **Optimize the current flow:**
-            echo "   - Reduce context window"
-            echo "   - Use faster LLM model"
-            echo "   - Enable streaming responses"
+            echo "❌ Langflow request timed out"
             exit 1
           fi
-          
-          # Check if request succeeded
+
           if [ "$HTTP_CODE" != "200" ]; then
-            echo "❌ Langflow API call failed with status $HTTP_CODE"
-            echo "Full response:"
+            echo "❌ Langflow API failed"
             echo "$RESPONSE_BODY"
             exit 1
           fi
-          
+
           echo "✅ Langflow API call succeeded"
-          
-          # Save response to file
+
           echo "$RESPONSE_BODY" > response.json
+
           RESPONSE="$RESPONSE_BODY"
-          
-          echo "Response saved to response.json"
-          echo "Response size: $(echo "$RESPONSE_BODY" | wc -c) bytes"
+
+          echo "===== RESPONSE PREVIEW ====="
+          echo "$RESPONSE" | head -c 1000
+          echo ""
 
           if [ -n "$RESPONSE" ] && echo "$RESPONSE" | jq empty >/dev/null 2>&1; then
 
-            # Parse response with timeout (30 seconds max for jq)
-            REVIEW_CONTENT=$(timeout 30 bash -c 'echo "$1" | jq -r '"'"'
+            REVIEW_CONTENT=$(echo "$RESPONSE" | jq -r '
               if .status == "error" or .error then
                 "❌ Langflow Error: " + (.error // .message // "Unknown error")
 
               elif .outputs then
-                # Langflow multi-agent response format
-                # Extract outputs from all agents and combine them
-                if (.outputs | length) > 0 then
-                  (
-                    # Try to get all agent outputs
-                    [.outputs[].outputs[]?.results.message.text // .outputs[].outputs[]?.results.text // .outputs[].outputs[]?.message]
-                    | map(select(. != null))
-                    | if length > 0 then
-                        # Combine all agent outputs with separators
-                        "## 📊 Agent 1: Comprehensive Technical Review\n\n" + .[0] +
-                        (if length > 1 then "\n\n---\n\n## 🎨 Agent 2: Code Quality Score\n\n" + .[1] else "" end) +
-                        (if length > 2 then "\n\n---\n\n## 📋 Agent 3: Additional Analysis\n\n" + .[2] else "" end)
-                      else
-                        "⚠️ No output found in Langflow response"
-                      end
-                  )
-                else
-                  "⚠️ No outputs array in response"
-                end
-              '"'"' || echo "⚠️ Response parsing timed out"' -- "$RESPONSE")
+                (
+                  [.outputs[].outputs[]?.results.message.text // .outputs[].outputs[]?.results.text // .outputs[].outputs[]?.message]
+                  | map(select(. != null))
+                  | if length > 0 then
+                      .[0]
+                    else
+                      "⚠️ No output found in Langflow response"
+                    end
+                )
 
               elif .messages then
-                # A2A format (fallback)
                 (
                   .messages[]
                   | select(.role == "assistant")
@@ -352,15 +272,15 @@ jobs:
         shell: bash
         run: |
           REVIEW_CONTENT=$(cat review-output.txt)
-      
+
           echo "$REVIEW_CONTENT"
-      
-          if echo "$REVIEW_CONTENT" | grep -Eiq "(critical runtime failure|security vulnerability|severe GenAI workflow risk)"; then
-            echo "❌ Critical issues detected"
+
+          if echo "$REVIEW_CONTENT" | grep -qi "^Recommendation: Request Changes"; then
+            echo "❌ AI recommends request changes"
             exit 1
-      
+
           else
-            echo "✅ Review passed with suggestions"
+            echo "✅ Review passed"
           fi
 
       - name: Upload artifacts for debugging
