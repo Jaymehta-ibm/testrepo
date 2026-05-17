@@ -208,8 +208,8 @@ jobs:
           if [ -n "$RESPONSE" ] && echo "$RESPONSE" | jq empty >/dev/null 2>&1; then
 
             REVIEW_CONTENT=$(echo "$RESPONSE" | jq -r '
-              .message.text
-              // .message.data.text
+              .message.data.text
+              // .message.text
               // .response
               // .content
               // .output
@@ -220,8 +220,11 @@ jobs:
             REVIEW_CONTENT="❌ Invalid JSON response from API"
           fi
 
-          echo "===== REVIEW CONTENT ====="
+          echo ""
+          echo "===== EXTRACTED REVIEW CONTENT ====="
           echo "$REVIEW_CONTENT"
+          echo "===================================="
+          echo ""
 
           echo "$REVIEW_CONTENT" > review-output.txt
 
