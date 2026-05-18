@@ -147,7 +147,7 @@ jobs:
           echo "Session ID: $SESSION_ID"
 
           RESPONSE=$(curl --max-time 300 -s -w "\n%{http_code}" -X POST \
-            "https://langflow.servicesessentials.ibm.com/api/v1/run/7742fc22-0505-4925-9e56-4d4becf7fd4a?stream=false" \
+            "https://langflow.servicesessentials.ibm.com/api/v1/run/91949888-c1f2-4906-a03d-a1da41edf95f?stream=false" \
             -H "Content-Type: application/json" \
             -H "x-api-key: ${{ secrets.BOB_SMARTCODER_API_KEY }}" \
             -d @langflow-payload.json)
