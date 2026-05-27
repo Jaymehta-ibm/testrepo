@@ -245,7 +245,7 @@ jobs:
 
           echo "$REVIEW_CONTENT"
 
-          if echo "$REVIEW_CONTENT" | grep -qi "Recommendation: Request Changes"; then
+          if echo "$REVIEW_CONTENT" | grep -qi "Request Changes"; then
             echo "❌ AI recommends request changes"
             exit 1
           else
